@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import random
+from pathlib import Path
 from typing import TypeAlias
 
 from gym_super_mario_bros.actions import SIMPLE_MOVEMENT
@@ -10,6 +12,7 @@ from environment import MarioEnvironment, MarioState
 
 StateKey: TypeAlias = tuple[int, ...]
 STATUS_IDS = {"small": 0, "tall": 1, "fireball": 2}
+DEFAULT_MODEL = Path(__file__).with_name("q_table.json")
 
 LEARNING_RATE = 0.20
 DISCOUNT_FACTOR = 0.95
@@ -74,8 +77,6 @@ class QLearningAgent:
         self.epsilon_decay = epsilon_decay
         self.q_table: dict[StateKey, list[float]] = {}
         self.training_episodes = 0
-        self.training_episode_count_known = True
-        self.estimated_episode_offset_applied = False
         self.random = random.Random(seed)
 
     def values_for(self, state: StateKey) -> list[float]:
@@ -106,6 +107,31 @@ class QLearningAgent:
     def finish_episode(self) -> None:
         self.training_episodes += 1
         self.epsilon = max(self.min_epsilon, self.epsilon * self.epsilon_decay)
+
+    def save(self, path: Path) -> None:
+        """Enregistre la table Q, ε et le nombre d'épisodes dans un fichier JSON."""
+        data = {
+            "actions": SIMPLE_MOVEMENT,
+            "epsilon": self.epsilon,
+            "training_episodes": self.training_episodes,
+            "q_table": [
+                {"state": list(state), "values": values}
+                for state, values in self.q_table.items()
+            ],
+        }
+        path.write_text(json.dumps(data), encoding="utf-8")
+
+    def load(self, path: Path) -> bool:
+        """Recharge un modèle sauvegardé ; renvoie False si le fichier n'existe pas."""
+        if not path.exists():
+            return False
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if data["actions"] != SIMPLE_MOVEMENT:
+            raise ValueError(f"Modèle entraîné avec d'autres actions : {path}")
+        self.q_table = {tuple(row["state"]): row["values"] for row in data["q_table"]}
+        self.epsilon = data["epsilon"]
+        self.training_episodes = data["training_episodes"]
+        return True
 
 
 def run_episode(
@@ -158,12 +184,12 @@ def run_episode(
 
 
 
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--episodes", type=int, default=500)
     parser.add_argument("--steps", type=int, default=1500)
     parser.add_argument("--frames", type=int, default=8)
+    parser.add_argument("--model", type=Path, default=DEFAULT_MODEL)
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--render", action="store_true")
     parser.add_argument("--fps", type=float, default=30.0)
@@ -178,6 +204,14 @@ def main() -> None:
         action_count=len(SIMPLE_MOVEMENT),
         seed=args.seed,
     )
+    if agent.load(args.model):
+        print(
+            f"Modèle chargé : {len(agent.q_table)} états, "
+            f"{agent.training_episodes} épisodes, epsilon={agent.epsilon:.3f}"
+        )
+    else:
+        print("Aucun modèle trouvé : apprentissage depuis zéro.")
+
     try:
         episode_count = 1 if args.play else args.episodes
         for episode in range(episode_count):
@@ -193,24 +227,23 @@ def main() -> None:
             )
             if not args.play:
                 agent.finish_episode()
+                if (episode + 1) % 10 == 0:
+                    agent.save(args.model)
 
             result = "NIVEAU TERMINÉ" if cleared else "niveau non terminé"
-            count_label = (
-                "total entraînements"
-                if agent.training_episode_count_known
-                else "entraînements comptabilisés"
-            )
             print(
                 f"Épisode {episode + 1}/{episode_count}: {result} | "
                 f"progression={progress} | récompense={total_reward:.1f} | "
                 f"actions={steps} | epsilon={agent.epsilon:.3f} | "
                 f"états appris={len(agent.q_table)} | "
-                f"{count_label}={agent.training_episodes}"
+                f"total entraînements={agent.training_episodes}"
             )
-
     except KeyboardInterrupt:
         print("Entraînement interrompu.")
     finally:
+        if not args.play:
+            agent.save(args.model)
+            print(f"Modèle sauvegardé dans {args.model}")
         environment.close()
 
 if __name__ == "__main__":
