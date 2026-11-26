@@ -31,3 +31,17 @@ source .venv/bin/activate
 python Mario/mario.py
 ```
 Flèches : bouger | Espace : sauter | X : courir | Entrée : start | Échap : quitter
+
+
+## Premier agent : Q-learning
+L'agent apprend sur le niveau 1-1 avec une Q-table. Il utilise les récompenses fournies par Gymnasium pour la progression, les pièces, les bonus, la mort et la fin du niveau. La table et le nombre d'épisodes d'entraînement sont sauvegardés dans `Mario/q_table.json`, puis rechargés pour poursuivre l'apprentissage ou jouer avec la politique apprise.
+```bash
+source .venv/bin/activate
+python Mario/q_learning.py --episodes 500
+```
+L'entraînement est sans affichage par défaut pour accélérer les essais. Pour afficher une partie après l'entraînement :
+```bash
+python Mario/q_learning.py --play --render
+```
+L'affichage est limité à 30 images par seconde pour laisser le temps de suivre Mario. Pour ralentir davantage : `python Mario/q_learning.py --play --render --fps 12`.
+Pour un essai court : `python Mario/q_learning.py --episodes 5 --steps 300`. L'option `--render` affiche aussi l'entraînement, mais le ralentit. Cette première version apprend sur le niveau 1-1 ; réussir le niveau n'est pas garanti et nécessitera plusieurs entraînements et ajustements. L'ancienne Q-table ne contenant pas de compteur, le décompte exact commencera à la prochaine session d'entraînement.
