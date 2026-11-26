@@ -1,16 +1,58 @@
 from __future__ import annotations
 
+import argparse
 import random
 from typing import TypeAlias
 
+from gym_super_mario_bros.actions import SIMPLE_MOVEMENT
+
+from environment import MarioEnvironment, MarioState
 
 StateKey: TypeAlias = tuple[int, ...]
+STATUS_IDS = {"small": 0, "tall": 1, "fireball": 2}
 
 LEARNING_RATE = 0.20
 DISCOUNT_FACTOR = 0.95
 INITIAL_EPSILON = 1.0
 MIN_EPSILON = 0.05
 EPSILON_DECAY = 0.995
+
+
+def encode_state(
+    state: MarioState,
+    previous_state: MarioState | None = None,
+) -> StateKey:
+    delta_x = 0 if previous_state is None else state.x_pos - previous_state.x_pos
+    delta_y = 0 if previous_state is None else state.y_pos - previous_state.y_pos
+    velocity_x = max(-4, min(4, delta_x // 8))
+    velocity_y = max(-4, min(4, delta_y // 8))
+    enemies = tuple(state.enemy_types[:5])
+    enemies += (0,) * (5 - len(enemies))
+
+    return (
+        state.world,
+        state.stage,
+        state.x_pos // 16,
+        state.y_pos // 16,
+        velocity_x,
+        velocity_y,
+        state.player_state,
+        STATUS_IDS.get(state.status, 2),
+        state.y_viewport,
+        *enemies,
+    )
+
+
+def learning_reward(components: dict[str, float]) -> float:
+    return (
+        components.get("progress", 0.0)
+        + components.get("time", 0.0) * 0.02
+        + components.get("score", 0.0)
+        + components.get("coins", 0.0)
+        + components.get("powerup", 0.0)
+        + components.get("completion", 0.0) * 20.0
+        + components.get("death", 0.0) * 4.0
+    )
 
 
 class QLearningAgent:
@@ -64,3 +106,112 @@ class QLearningAgent:
     def finish_episode(self) -> None:
         self.training_episodes += 1
         self.epsilon = max(self.min_epsilon, self.epsilon * self.epsilon_decay)
+
+
+def run_episode(
+    environment: MarioEnvironment,
+    agent: QLearningAgent,
+    max_steps: int,
+    frames_per_action: int,
+    explore: bool,
+    render: bool,
+    seed: int | None = None,
+    render_fps: float = 30.0,
+) -> tuple[float, int, bool, int]:
+    if max_steps < 1:
+        raise ValueError("max_steps must be at least 1.")
+    if frames_per_action < 1:
+        raise ValueError("frames_per_action must be at least 1.")
+
+    state = environment.reset(seed=seed)
+    previous_state: MarioState | None = None
+    total_reward = 0.0
+    progress = state.x_pos
+    steps_taken = 0
+
+    for step_index in range(max_steps):
+        steps_taken = step_index + 1
+        state_key = encode_state(state, previous_state)
+        action = agent.choose_action(state_key, explore=explore)
+        next_state, terminated, truncated, environment_reward, components = (
+            environment.step_action_with_reward(
+                action,
+                frames_per_action,
+                render_fps=render_fps if render else None,
+            )
+        )
+        reward = learning_reward(components) if components else environment_reward
+        next_key = encode_state(next_state, state)
+        episode_done = terminated or truncated
+
+        if explore:
+            agent.update(state_key, action, reward, next_key, episode_done)
+
+        total_reward += reward
+        progress = max(progress, next_state.x_pos)
+        state, previous_state = next_state, state
+
+        if episode_done:
+            break
+
+    return total_reward, progress, state.clear, steps_taken
+
+
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--episodes", type=int, default=500)
+    parser.add_argument("--steps", type=int, default=1500)
+    parser.add_argument("--frames", type=int, default=8)
+    parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--render", action="store_true")
+    parser.add_argument("--fps", type=float, default=30.0)
+    parser.add_argument("--play", action="store_true", help="Jouer sans modifier la Q-table")
+    args = parser.parse_args()
+
+    if args.episodes < 1 or args.steps < 1 or args.frames < 1 or args.fps <= 0:
+        parser.error("episodes, steps, frames et fps doivent être supérieurs à zéro")
+
+    environment = MarioEnvironment(render=args.render)
+    agent = QLearningAgent(
+        action_count=len(SIMPLE_MOVEMENT),
+        seed=args.seed,
+    )
+    try:
+        episode_count = 1 if args.play else args.episodes
+        for episode in range(episode_count):
+            total_reward, progress, cleared, steps = run_episode(
+                environment,
+                agent,
+                max_steps=args.steps,
+                frames_per_action=args.frames,
+                explore=not args.play,
+                render=args.render,
+                seed=args.seed + episode,
+                render_fps=args.fps,
+            )
+            if not args.play:
+                agent.finish_episode()
+
+            result = "NIVEAU TERMINÉ" if cleared else "niveau non terminé"
+            count_label = (
+                "total entraînements"
+                if agent.training_episode_count_known
+                else "entraînements comptabilisés"
+            )
+            print(
+                f"Épisode {episode + 1}/{episode_count}: {result} | "
+                f"progression={progress} | récompense={total_reward:.1f} | "
+                f"actions={steps} | epsilon={agent.epsilon:.3f} | "
+                f"états appris={len(agent.q_table)} | "
+                f"{count_label}={agent.training_episodes}"
+            )
+
+    except KeyboardInterrupt:
+        print("Entraînement interrompu.")
+    finally:
+        environment.close()
+
+if __name__ == "__main__":
+    main()
