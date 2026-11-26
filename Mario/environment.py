@@ -1,5 +1,3 @@
-"""Small adapter around the Gymnasium Super Mario Bros environment."""
-
 from __future__ import annotations
 
 import time
@@ -14,7 +12,7 @@ from nes_py.wrappers import JoypadSpace
 
 @dataclass(frozen=True)
 class MarioState:
-    """Useful, human-readable values describing Mario's current state."""
+    """ position de mario """
 
     world: int
     stage: int
@@ -30,7 +28,6 @@ class MarioState:
 
     @classmethod
     def from_info(cls, info: dict[str, Any]) -> MarioState:
-        """Build a state from the metadata returned by Gymnasium."""
         return cls(
             world=int(info.get("world", 1)),
             stage=int(info.get("stage", 1)),
@@ -51,7 +48,6 @@ class MarioState:
 
 
 class MarioEnvironment:
-    """Expose Mario actions, state values, and emulator snapshots."""
 
     def __init__(
         self,
@@ -65,7 +61,6 @@ class MarioEnvironment:
         self.last_info: dict[str, Any] = {}
 
     def reset(self, seed: int | None = None) -> MarioState:
-        """Start a new episode and return its initial state."""
         _, info = self.env.reset(seed=seed)
         self.last_info = info
         self.state = MarioState.from_info(info)
@@ -76,7 +71,6 @@ class MarioEnvironment:
         action: int,
         frames: int,
     ) -> tuple[MarioState, bool, bool]:
-        """Hold an action for up to ``frames`` and return state/end flags."""
         state, terminated, truncated, _, _ = self.step_action_with_reward(
             action,
             frames,
@@ -89,7 +83,6 @@ class MarioEnvironment:
         frames: int,
         render_fps: float | None = None,
     ) -> tuple[MarioState, bool, bool, float, dict[str, float]]:
-        """Hold an action and aggregate reward components over its frames."""
         if render_fps is not None and render_fps <= 0:
             raise ValueError("render_fps must be greater than 0.")
 
@@ -117,9 +110,7 @@ class MarioEnvironment:
         return self.state, terminated, truncated, total_reward, reward_components
 
     def render(self) -> None:
-        """Display the current frame when human rendering is enabled."""
         self.env.render()
 
     def close(self) -> None:
-        """Release the emulator and any rendering resources."""
         self.env.close()

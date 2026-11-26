@@ -18,6 +18,23 @@ DEFAULT_MODEL = Path(__file__).with_name("q_table.json")
 STATUS_IDS = {"small": 0, "tall": 1, "fireball": 2}
 
 
+# =============================================================================
+# PARAMÈTRES CENTRAUX DU Q-LEARNING
+# =============================================================================
+# learning_rate : combien une nouvelle expérience corrige la valeur précédente.
+# discount      : poids accordé aux récompenses futures.
+# epsilon       : proportion de décisions prises au hasard pour explorer.
+LEARNING_RATE = 0.20
+DISCOUNT_FACTOR = 0.95
+INITIAL_EPSILON = 1.0
+MIN_EPSILON = 0.05
+EPSILON_DECAY = 0.995
+ESTIMATED_OLD_EPISODES = 1000
+
+
+# =============================================================================
+# 1. TRANSFORMATION DU JEU EN ÉTAT NUMÉRIQUE
+# =============================================================================
 def encode_state(
     state: MarioState,
     previous_state: MarioState | None = None,
@@ -44,6 +61,9 @@ def encode_state(
     )
 
 
+# =============================================================================
+# 2. FAÇONNER LA RÉCOMPENSE
+# =============================================================================
 def learning_reward(components: dict[str, float]) -> float:
     """Shape upstream rewards, emphasizing level completion and avoiding death."""
     return (
@@ -52,22 +72,25 @@ def learning_reward(components: dict[str, float]) -> float:
         + components.get("score", 0.0)
         + components.get("coins", 0.0)
         + components.get("powerup", 0.0)
-        + components.get("completion", 0.0) * 10.0
+        + components.get("completion", 0.0) * 20.0
         + components.get("death", 0.0) * 4.0
     )
 
 
+# =============================================================================
+# 3. LA TABLE Q
+# =============================================================================
 class QLearningAgent:
     """A small Q-table that can be saved and resumed between runs."""
 
     def __init__(
         self,
         action_count: int,
-        learning_rate: float = 0.2,
-        discount: float = 0.95,
-        epsilon: float = 1.0,
-        min_epsilon: float = 0.05,
-        epsilon_decay: float = 0.995,
+        learning_rate: float = LEARNING_RATE,
+        discount: float = DISCOUNT_FACTOR,
+        epsilon: float = INITIAL_EPSILON,
+        min_epsilon: float = MIN_EPSILON,
+        epsilon_decay: float = EPSILON_DECAY,
         seed: int | None = None,
     ) -> None:
         self.action_count = action_count
@@ -163,11 +186,14 @@ class QLearningAgent:
             not self.training_episode_count_known
             and not self.estimated_episode_offset_applied
         ):
-            self.training_episodes += 1000
+            self.training_episodes += ESTIMATED_OLD_EPISODES
             self.estimated_episode_offset_applied = True
         return True
 
 
+# =============================================================================
+# 4. UN ÉPISODE
+# =============================================================================
 def run_episode(
     environment: MarioEnvironment,
     agent: QLearningAgent,
@@ -218,6 +244,9 @@ def run_episode(
     return total_reward, progress, state.clear, steps_taken
 
 
+# =============================================================================
+# 5. DÉMARRAGE
+# =============================================================================
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--episodes", type=int, default=500)
