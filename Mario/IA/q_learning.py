@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import random
 from pathlib import Path
@@ -8,11 +9,12 @@ from typing import TypeAlias
 
 from gym_super_mario_bros.actions import SIMPLE_MOVEMENT
 
-from Mario.IA.environment import MarioEnvironment, MarioState
+from environment import MarioEnvironment, MarioState
 
 StateKey: TypeAlias = tuple[int, ...]
 STATUS_IDS = {"small": 0, "tall": 1, "fireball": 2}
-DEFAULT_MODEL = Path(__file__).with_name("q_table.json")
+MODELS_DIR = Path(__file__).with_name("models")
+JOURNAL_COLUMNS = ["episode", "x_max", "drapeau", "recompense", "actions", "epsilon", "nb_etats"]
 
 LEARNING_RATE = 0.20
 DISCOUNT_FACTOR = 0.95
@@ -168,20 +170,27 @@ def run_episode(
         )
         reward = learning_reward(components) if components else environment_reward
         next_key = encode_state(next_state, state)
-        episode_done = terminated or truncated
 
         if explore:
-            agent.update(state_key, action, reward, next_key, episode_done)
+            agent.update(state_key, action, reward, next_key, terminated)
 
         total_reward += reward
         progress = max(progress, next_state.x_pos)
         state, previous_state = next_state, state
 
-        if episode_done:
+        if terminated or truncated:
             break
 
     return total_reward, progress, state.clear, steps_taken
 
+def write_journal_line(path: Path, row: list) -> None:
+    """Ajoute une ligne au journal CSV ; écrit l'en-tête si le fichier est nouveau."""
+    new_file = not path.exists()
+    with path.open("a", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file)
+        if new_file:
+            writer.writerow(JOURNAL_COLUMNS)
+        writer.writerow(row)
 
 
 def main() -> None:
@@ -189,7 +198,7 @@ def main() -> None:
     parser.add_argument("--episodes", type=int, default=500)
     parser.add_argument("--steps", type=int, default=1500)
     parser.add_argument("--frames", type=int, default=8)
-    parser.add_argument("--model", type=Path, default=DEFAULT_MODEL)
+    parser.add_argument("--name", default="q_table", help="Nom de l'essai (modèle et journal)")
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--render", action="store_true")
     parser.add_argument("--fps", type=float, default=30.0)
@@ -199,18 +208,23 @@ def main() -> None:
     if args.episodes < 1 or args.steps < 1 or args.frames < 1 or args.fps <= 0:
         parser.error("episodes, steps, frames et fps doivent être supérieurs à zéro")
 
+    model_path = MODELS_DIR / f"{args.name}.json"
+    journal_path = MODELS_DIR / f"{args.name}.csv"
+    MODELS_DIR.mkdir(exist_ok=True)
+
     environment = MarioEnvironment(render=args.render)
     agent = QLearningAgent(
         action_count=len(SIMPLE_MOVEMENT),
         seed=args.seed,
     )
-    if agent.load(args.model):
+    if agent.load(model_path):
         print(
             f"Modèle chargé : {len(agent.q_table)} états, "
             f"{agent.training_episodes} épisodes, epsilon={agent.epsilon:.3f}"
         )
     else:
         print("Aucun modèle trouvé : apprentissage depuis zéro.")
+    agent.random.seed(args.seed + agent.training_episodes)
 
     try:
         episode_count = 1 if args.play else args.episodes
@@ -227,8 +241,20 @@ def main() -> None:
             )
             if not args.play:
                 agent.finish_episode()
+                write_journal_line(
+                    journal_path,
+                    [
+                        agent.training_episodes,
+                        progress,
+                        int(cleared),
+                        round(total_reward, 1),
+                        steps,
+                        round(agent.epsilon, 4),
+                        len(agent.q_table),
+                    ],
+                )
                 if (episode + 1) % 10 == 0:
-                    agent.save(args.model)
+                    agent.save(model_path)
 
             result = "NIVEAU TERMINÉ" if cleared else "niveau non terminé"
             print(
@@ -242,8 +268,8 @@ def main() -> None:
         print("Entraînement interrompu.")
     finally:
         if not args.play:
-            agent.save(args.model)
-            print(f"Modèle sauvegardé dans {args.model}")
+            agent.save(model_path)
+            print(f"Modèle sauvegardé dans {model_path}")
         environment.close()
 
 if __name__ == "__main__":
