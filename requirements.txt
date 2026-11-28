@@ -2,3 +2,4 @@
 nes-py==9.0.1
 gymnasium==1.4.0
 numpy==2.5.4
+matplotlib==3.11.2
