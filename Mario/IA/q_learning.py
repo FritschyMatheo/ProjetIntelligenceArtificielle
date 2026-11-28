@@ -144,6 +144,7 @@ def run_episode(
     render: bool,
     seed: int | None = None,
     render_fps: float = 30.0,
+    noops: int = 0,
 ) -> tuple[float, int, bool, int]:
     if max_steps < 1:
         raise ValueError("max_steps must be at least 1.")
@@ -151,6 +152,11 @@ def run_episode(
         raise ValueError("frames_per_action must be at least 1.")
 
     state = environment.reset(seed=seed)
+    wait = random.Random(seed).randint(0, noops)
+    if wait > 0:
+        state, _, _, _, _ = environment.step_action_with_reward(
+            0, wait, render_fps=render_fps if render else None
+        )
     previous_action = 0
     state_key = encode_state(environment, previous_action)
     total_reward = 0.0
@@ -208,6 +214,7 @@ def main() -> None:
     parser.add_argument("--render", action="store_true")
     parser.add_argument("--fps", type=float, default=30.0)
     parser.add_argument("--play", action="store_true", help="Jouer sans modifier la Q-table")
+    parser.add_argument("--noops", type=int, default=0, help="Attente aléatoire de 0 à N frames au départ")
     args = parser.parse_args()
 
     if args.episodes < 1 or args.steps < 1 or args.frames < 1 or args.fps <= 0:
@@ -235,7 +242,7 @@ def main() -> None:
     best_x = int(best_x_path.read_text()) if best_x_path.exists() else 0
 
     try:
-        episode_count = 1 if args.play else args.episodes
+        episode_count = 1 if args.play and args.noops == 0 else args.episodes
         for episode in range(episode_count):
             total_reward, progress, cleared, steps = run_episode(
                 environment,
@@ -246,6 +253,7 @@ def main() -> None:
                 render=args.render,
                 seed=args.seed + episode,
                 render_fps=args.fps,
+                noops=args.noops,
             )
             if not args.play:
                 agent.finish_episode()
