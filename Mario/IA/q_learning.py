@@ -12,7 +12,9 @@ from gym_super_mario_bros.actions import SIMPLE_MOVEMENT
 from environment import MarioEnvironment, MarioState
 
 StateKey: TypeAlias = tuple[int, ...]
-STATUS_IDS = {"small": 0, "tall": 1, "fireball": 2}
+#STATUS_IDS = {"small": 0, "tall": 1, "fireball": 2}
+A_IDS = {i for i, buttons in enumerate(SIMPLE_MOVEMENT) if "A" in buttons}
+
 MODELS_DIR = Path(__file__).with_name("models")
 JOURNAL_COLUMNS = ["episode", "x_max", "drapeau", "recompense", "actions", "epsilon", "nb_etats"]
 
@@ -22,7 +24,30 @@ INITIAL_EPSILON = 1.0
 MIN_EPSILON = 0.05
 EPSILON_DECAY = 0.995
 
+def encode_state(environment: MarioEnvironment, previous_action: int) -> StateKey:
+    """État s = (case_x, au_sol, a_tenu, ennemi, vitesse), lu dans la RAM du jeu."""
+    ram = environment.env.unwrapped.ram
+    x = int(ram[0x6D]) * 256 + int(ram[0x86])
+    case_x = x // 16
+    au_sol = int(ram[0x1D] == 0)
+    a_tenu = int(previous_action in A_IDS)
 
+    vx = int(ram[0x57])
+    vx = 0 if vx > 127 else vx
+    vitesse = 0 if vx < 16 else (1 if vx < 32 else 2)
+
+    ennemi = 0
+    for i in range(5):
+        if ram[0x0F + i]:
+            dx = int(ram[0x6E + i]) * 256 + int(ram[0x87 + i]) - x
+            if -8 <= dx <= 32:
+                ennemi = 1
+            elif dx <= 80 and ennemi == 0:
+                ennemi = 2
+
+    return (case_x, au_sol, a_tenu, ennemi, vitesse)
+
+"""
 def encode_state(
     state: MarioState,
     previous_state: MarioState | None = None,
@@ -46,7 +71,7 @@ def encode_state(
         state.y_viewport,
         *enemies,
     )
-
+"""
 
 def learning_reward(components: dict[str, float]) -> float:
     return (
@@ -136,7 +161,7 @@ class QLearningAgent:
         return True
 
 
-def run_episode(
+"""def run_episode(
     environment: MarioEnvironment,
     agent: QLearningAgent,
     max_steps: int,
@@ -177,6 +202,52 @@ def run_episode(
         total_reward += reward
         progress = max(progress, next_state.x_pos)
         state, previous_state = next_state, state
+
+        if terminated or truncated:
+            break
+
+    return total_reward, progress, state.clear, steps_taken"""
+def run_episode(
+    environment: MarioEnvironment,
+    agent: QLearningAgent,
+    max_steps: int,
+    frames_per_action: int,
+    explore: bool,
+    render: bool,
+    seed: int | None = None,
+    render_fps: float = 30.0,
+) -> tuple[float, int, bool, int]:
+    if max_steps < 1:
+        raise ValueError("max_steps must be at least 1.")
+    if frames_per_action < 1:
+        raise ValueError("frames_per_action must be at least 1.")
+
+    state = environment.reset(seed=seed)
+    previous_action = 0
+    state_key = encode_state(environment, previous_action)
+    total_reward = 0.0
+    progress = state.x_pos
+    steps_taken = 0
+
+    for step_index in range(max_steps):
+        steps_taken = step_index + 1
+        action = agent.choose_action(state_key, explore=explore)
+        state, terminated, truncated, environment_reward, components = (
+            environment.step_action_with_reward(
+                action,
+                frames_per_action,
+                render_fps=render_fps if render else None,
+            )
+        )
+        reward = learning_reward(components) if components else environment_reward
+        next_key = encode_state(environment, action)
+
+        if explore:
+            agent.update(state_key, action, reward, next_key, terminated)
+
+        total_reward += reward
+        progress = max(progress, state.x_pos)
+        state_key = next_key
 
         if terminated or truncated:
             break
