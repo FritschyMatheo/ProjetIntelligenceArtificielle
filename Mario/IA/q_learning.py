@@ -13,6 +13,7 @@ from environment import MarioEnvironment
 
 StateKey: TypeAlias = tuple[int, ...]
 A_IDS = {i for i, buttons in enumerate(RIGHT_ONLY) if "A" in buttons}
+ACTION_NAMES = ["+".join(buttons) for buttons in RIGHT_ONLY]
 MODELS_DIR = Path(__file__).with_name("models")
 JOURNAL_COLUMNS = ["episode", "x_max", "drapeau", "recompense", "actions", "epsilon", "nb_etats"]
 
@@ -135,6 +136,16 @@ class QLearningAgent:
         return True
 
 
+def show_step(step: int, x: int, state_key: StateKey, values: list[float], action: int) -> None:
+    """Affiche dans le terminal l'état, les valeurs Q(s, a) et l'action choisie."""
+    case_x, au_sol, a_tenu, ennemi, vitesse = state_key
+    q_text = " ".join(f"{value:7.1f}" for value in values)
+    print(
+        f"pas {step:4d} | x={x:5d} | case={case_x:3d} sol={au_sol} A={a_tenu} "
+        f"ennemi={ennemi} vit={vitesse} | Q=[{q_text}] | {ACTION_NAMES[action]}"
+    )
+
+
 def run_episode(
     environment: MarioEnvironment,
     agent: QLearningAgent,
@@ -145,6 +156,7 @@ def run_episode(
     seed: int | None = None,
     render_fps: float = 30.0,
     noops: int = 0,
+    verbose: bool = False,
 ) -> tuple[float, int, bool, int]:
     if max_steps < 1:
         raise ValueError("max_steps must be at least 1.")
@@ -167,6 +179,8 @@ def run_episode(
     for step_index in range(max_steps):
         steps_taken = step_index + 1
         action = agent.choose_action(state_key, explore=explore)
+        if verbose:
+            show_step(steps_taken, state.x_pos, state_key, agent.values_for(state_key), action)
         state, terminated, truncated, environment_reward, components = (
             environment.step_action_with_reward(
                 action,
@@ -202,6 +216,17 @@ def write_journal_line(path: Path, row: list) -> None:
         if new_file:
             writer.writerow(JOURNAL_COLUMNS)
         writer.writerow(row)
+
+
+def show_summary(results: list[tuple[int, bool]]) -> None:
+    """Affiche le bilan des parties jouées : niveaux finis et distances atteintes."""
+    finished = sum(cleared for _, cleared in results)
+    distances = [x for x, _ in results]
+    print(
+        f"Terminé {finished} fois / {len(results)} ({100 * finished / len(results):.0f} %) | "
+        f"x moyen={sum(distances) / len(distances):.0f} | "
+        f"x min={min(distances)} | x max={max(distances)}"
+    )
 
 
 def main() -> None:
@@ -240,6 +265,7 @@ def main() -> None:
         print("Aucun modèle trouvé : apprentissage depuis zéro.")
     agent.random.seed(args.seed + agent.training_episodes)
     best_x = int(best_x_path.read_text()) if best_x_path.exists() else 0
+    play_results = []
 
     try:
         episode_count = 1 if args.play and args.noops == 0 else args.episodes
@@ -254,6 +280,7 @@ def main() -> None:
                 seed=args.seed + episode,
                 render_fps=args.fps,
                 noops=args.noops,
+                verbose=args.play and episode_count == 1,
             )
             if not args.play:
                 agent.finish_episode()
@@ -286,6 +313,8 @@ def main() -> None:
                         best_x_path.write_text(str(best_x))
                         print(f"Nouveau meilleur test glouton : x={test_x}, drapeau={test_cleared}")
 
+            if args.play:
+                play_results.append((progress, cleared))
             result = "NIVEAU TERMINÉ" if cleared else "niveau non terminé"
             print(
                 f"Épisode {episode + 1}/{episode_count}: {result} | "
@@ -294,6 +323,8 @@ def main() -> None:
                 f"états appris={len(agent.q_table)} | "
                 f"total entraînements={agent.training_episodes}"
             )
+        if args.play and len(play_results) > 1:
+            show_summary(play_results)
     except KeyboardInterrupt:
         print("Entraînement interrompu.")
     finally:
