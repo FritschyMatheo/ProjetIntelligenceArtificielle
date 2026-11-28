@@ -9,20 +9,19 @@ from typing import TypeAlias
 
 from gym_super_mario_bros.actions import RIGHT_ONLY
 
-from environment import MarioEnvironment, MarioState
+from environment import MarioEnvironment
 
 StateKey: TypeAlias = tuple[int, ...]
-#STATUS_IDS = {"small": 0, "tall": 1, "fireball": 2}
 A_IDS = {i for i, buttons in enumerate(RIGHT_ONLY) if "A" in buttons}
-
 MODELS_DIR = Path(__file__).with_name("models")
 JOURNAL_COLUMNS = ["episode", "x_max", "drapeau", "recompense", "actions", "epsilon", "nb_etats"]
 
-LEARNING_RATE = 0.20
+LEARNING_RATE = 0.50
 DISCOUNT_FACTOR = 0.95
 INITIAL_EPSILON = 1.0
 MIN_EPSILON = 0.05
 EPSILON_DECAY = 0.995
+
 
 def encode_state(environment: MarioEnvironment, previous_action: int) -> StateKey:
     """État s = (case_x, au_sol, a_tenu, ennemi, vitesse), lu dans la RAM du jeu."""
@@ -47,31 +46,6 @@ def encode_state(environment: MarioEnvironment, previous_action: int) -> StateKe
 
     return (case_x, au_sol, a_tenu, ennemi, vitesse)
 
-"""
-def encode_state(
-    state: MarioState,
-    previous_state: MarioState | None = None,
-) -> StateKey:
-    delta_x = 0 if previous_state is None else state.x_pos - previous_state.x_pos
-    delta_y = 0 if previous_state is None else state.y_pos - previous_state.y_pos
-    velocity_x = max(-4, min(4, delta_x // 8))
-    velocity_y = max(-4, min(4, delta_y // 8))
-    enemies = tuple(state.enemy_types[:5])
-    enemies += (0,) * (5 - len(enemies))
-
-    return (
-        state.world,
-        state.stage,
-        state.x_pos // 16,
-        state.y_pos // 16,
-        velocity_x,
-        velocity_y,
-        state.player_state,
-        STATUS_IDS.get(state.status, 2),
-        state.y_viewport,
-        *enemies,
-    )
-"""
 
 def learning_reward(components: dict[str, float]) -> float:
     return (
@@ -161,52 +135,6 @@ class QLearningAgent:
         return True
 
 
-"""def run_episode(
-    environment: MarioEnvironment,
-    agent: QLearningAgent,
-    max_steps: int,
-    frames_per_action: int,
-    explore: bool,
-    render: bool,
-    seed: int | None = None,
-    render_fps: float = 30.0,
-) -> tuple[float, int, bool, int]:
-    if max_steps < 1:
-        raise ValueError("max_steps must be at least 1.")
-    if frames_per_action < 1:
-        raise ValueError("frames_per_action must be at least 1.")
-
-    state = environment.reset(seed=seed)
-    previous_state: MarioState | None = None
-    total_reward = 0.0
-    progress = state.x_pos
-    steps_taken = 0
-
-    for step_index in range(max_steps):
-        steps_taken = step_index + 1
-        state_key = encode_state(state, previous_state)
-        action = agent.choose_action(state_key, explore=explore)
-        next_state, terminated, truncated, environment_reward, components = (
-            environment.step_action_with_reward(
-                action,
-                frames_per_action,
-                render_fps=render_fps if render else None,
-            )
-        )
-        reward = learning_reward(components) if components else environment_reward
-        next_key = encode_state(next_state, state)
-
-        if explore:
-            agent.update(state_key, action, reward, next_key, terminated)
-
-        total_reward += reward
-        progress = max(progress, next_state.x_pos)
-        state, previous_state = next_state, state
-
-        if terminated or truncated:
-            break
-
-    return total_reward, progress, state.clear, steps_taken"""
 def run_episode(
     environment: MarioEnvironment,
     agent: QLearningAgent,
@@ -228,6 +156,7 @@ def run_episode(
     total_reward = 0.0
     progress = state.x_pos
     steps_taken = 0
+    transitions = []
 
     for step_index in range(max_steps):
         steps_taken = step_index + 1
@@ -244,6 +173,7 @@ def run_episode(
 
         if explore:
             agent.update(state_key, action, reward, next_key, terminated)
+            transitions.append((state_key, action, reward, next_key, terminated))
 
         total_reward += reward
         progress = max(progress, state.x_pos)
@@ -252,7 +182,11 @@ def run_episode(
         if terminated or truncated:
             break
 
+    for transition in reversed(transitions):
+        agent.update(*transition)
+
     return total_reward, progress, state.clear, steps_taken
+
 
 def write_journal_line(path: Path, row: list) -> None:
     """Ajoute une ligne au journal CSV ; écrit l'en-tête si le fichier est nouveau."""
@@ -281,6 +215,8 @@ def main() -> None:
 
     model_path = MODELS_DIR / f"{args.name}.json"
     journal_path = MODELS_DIR / f"{args.name}.csv"
+    best_path = MODELS_DIR / f"{args.name}_best.json"
+    best_x_path = MODELS_DIR / f"{args.name}_best.txt"
     MODELS_DIR.mkdir(exist_ok=True)
 
     environment = MarioEnvironment(render=args.render)
@@ -296,6 +232,7 @@ def main() -> None:
     else:
         print("Aucun modèle trouvé : apprentissage depuis zéro.")
     agent.random.seed(args.seed + agent.training_episodes)
+    best_x = int(best_x_path.read_text()) if best_x_path.exists() else 0
 
     try:
         episode_count = 1 if args.play else args.episodes
@@ -326,6 +263,20 @@ def main() -> None:
                 )
                 if (episode + 1) % 10 == 0:
                     agent.save(model_path)
+                    agent.random.seed(args.seed + agent.training_episodes)
+                    _, test_x, test_cleared, _ = run_episode(
+                        environment,
+                        agent,
+                        max_steps=args.steps,
+                        frames_per_action=args.frames,
+                        explore=False,
+                        render=False,
+                    )
+                    if test_x > best_x:
+                        best_x = test_x
+                        agent.save(best_path)
+                        best_x_path.write_text(str(best_x))
+                        print(f"Nouveau meilleur test glouton : x={test_x}, drapeau={test_cleared}")
 
             result = "NIVEAU TERMINÉ" if cleared else "niveau non terminé"
             print(
