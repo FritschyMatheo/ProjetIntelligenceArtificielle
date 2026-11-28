@@ -1,5 +1,6 @@
 # Fichiers modèles locaux
 *.pkl
+models/
 journal.csv
 q_table.json
 
