@@ -6,7 +6,7 @@ from typing import Any
 
 import gymnasium as gym
 import gym_super_mario_bros
-from gym_super_mario_bros.actions import SIMPLE_MOVEMENT
+from gym_super_mario_bros.actions import RIGHT_ONLY
 from nes_py.wrappers import JoypadSpace
 
 
@@ -56,7 +56,7 @@ class MarioEnvironment:
     ) -> None:
         render_mode = "human" if render else None
         base_env = gym.make(env_id, render_mode=render_mode)
-        self.env = JoypadSpace(base_env, SIMPLE_MOVEMENT)
+        self.env = JoypadSpace(base_env, RIGHT_ONLY)
         self.state = MarioState.from_info({})
         self.last_info: dict[str, Any] = {}
 

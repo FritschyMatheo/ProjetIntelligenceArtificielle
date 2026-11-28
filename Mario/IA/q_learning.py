@@ -7,13 +7,13 @@ import random
 from pathlib import Path
 from typing import TypeAlias
 
-from gym_super_mario_bros.actions import SIMPLE_MOVEMENT
+from gym_super_mario_bros.actions import RIGHT_ONLY
 
 from environment import MarioEnvironment, MarioState
 
 StateKey: TypeAlias = tuple[int, ...]
 #STATUS_IDS = {"small": 0, "tall": 1, "fireball": 2}
-A_IDS = {i for i, buttons in enumerate(SIMPLE_MOVEMENT) if "A" in buttons}
+A_IDS = {i for i, buttons in enumerate(RIGHT_ONLY) if "A" in buttons}
 
 MODELS_DIR = Path(__file__).with_name("models")
 JOURNAL_COLUMNS = ["episode", "x_max", "drapeau", "recompense", "actions", "epsilon", "nb_etats"]
@@ -138,7 +138,7 @@ class QLearningAgent:
     def save(self, path: Path) -> None:
         """Enregistre la table Q, ε et le nombre d'épisodes dans un fichier JSON."""
         data = {
-            "actions": SIMPLE_MOVEMENT,
+            "actions": RIGHT_ONLY,
             "epsilon": self.epsilon,
             "training_episodes": self.training_episodes,
             "q_table": [
@@ -153,7 +153,7 @@ class QLearningAgent:
         if not path.exists():
             return False
         data = json.loads(path.read_text(encoding="utf-8"))
-        if data["actions"] != SIMPLE_MOVEMENT:
+        if data["actions"] != RIGHT_ONLY:
             raise ValueError(f"Modèle entraîné avec d'autres actions : {path}")
         self.q_table = {tuple(row["state"]): row["values"] for row in data["q_table"]}
         self.epsilon = data["epsilon"]
@@ -285,7 +285,7 @@ def main() -> None:
 
     environment = MarioEnvironment(render=args.render)
     agent = QLearningAgent(
-        action_count=len(SIMPLE_MOVEMENT),
+        action_count=len(RIGHT_ONLY),
         seed=args.seed,
     )
     if agent.load(model_path):
